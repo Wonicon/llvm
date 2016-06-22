@@ -2710,8 +2710,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
         unsigned PhysReg;
         if (TRI->isVirtualRegister(Reg)) {
           PhysReg = VRM->getPhys(Reg);
-          DEBUG(dbgs() << "Virtual Register " << Reg
-              << " has been assigned to Physical Register " << PhysReg << "\n" );
+          DEBUG(dbgs() << PrintReg(Reg) << " has been assigned to "
+                       << PrintReg(PhysReg, TRI) << "\n" );
         }
         /*
         else if (TRI->isPhysicalRegister(Reg)) {
@@ -2737,12 +2737,18 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   DEBUG(dbgs() << "YY: found writes in HFBBs\n");
 
 
-  std::set<unsigned> SramSet(SramRegisters, SramRegisters + 8);
   unsigned sram_subst = 0;
   // reinit SRAM usage
   for (unsigned i = 0; i < 8; ++i) {
     SramRegUsage[i] = 0;
   }
+
+  // Find to-be-written nvm registers in high-frequency basic blocks
+  // and swap them with sram registers.
+  // The available sram registers may be consumed up. As a proper register allocation
+  // scheme has been executed, the place to spill might be determined.
+  // To promise correctness, we could only swap one nvm with one sram exclusively.
+  /// @todo the swap is through the entire function, but only those high-frequency ones need to be treated.
   for (std::set<unsigned>::iterator it = written_pregs.begin(),
       it_end = written_pregs.end(); it != it_end; it++) {
     if (isNvm(*it) && (sram_subst = findSramSubstitude(*it))) { // remappable 
@@ -2778,6 +2784,9 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   return true;
 }
 
+/// Exchange virtual-physical mapping:
+///   before: %any0 <-> $reg0, %any1 <-> $reg1
+///   after:  %any0 <-> $reg1, %any1 <-> $reg0
 void RAGreedy::remapPhysReg(MachineFunction *MF, unsigned reg0, unsigned reg1) {
   for (unsigned i = 0, e = MRI->getNumVirtRegs(); i!=e; ++i) {
     unsigned Reg = TargetRegisterInfo::index2VirtReg(i);
@@ -2789,6 +2798,8 @@ void RAGreedy::remapPhysReg(MachineFunction *MF, unsigned reg0, unsigned reg1) {
       continue;
     }
     DEBUG(dbgs() << "Virtual Register: " << Reg << "\n");
+
+    // Symmetric exchange procedure
     if (PhysReg == reg0) {
       VRM->reAssignVirt2Phys(Reg, reg1);
       assert(VRM->getPhys(Reg) == reg1 && "reAssigning failed");
