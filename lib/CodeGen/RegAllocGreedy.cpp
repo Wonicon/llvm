@@ -2764,19 +2764,31 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   DEBUG(dbgs() << "WHZ: start checking nvm still written in loops\n");
   for (auto loop : *Loops) {
     DEBUG(dbgs() << "loop depth: " << loop->getLoopDepth() << '\n');
+    std::set<unsigned> regUsed;
     for (auto block : loop->getBlocks()) {
       DEBUG(block->dump());
       for (auto&& instr : block->instrs()) {
         for (auto&& ope : instr.operands()) {
-          decltype(ope.getReg()) vreg, preg;
+          unsigned vreg = 0, preg = 0;
           if (ope.isReg() && ope.isDef()
               && TRI->isVirtualRegister(vreg = ope.getReg())
               && isNvm(preg = VRM->getPhys(vreg))) {
             DEBUG(dbgs() << "Oops, nvm reg " << PrintReg(preg, TRI) << " is still written in loop\n");
           }
+          // vreg == 0 means not a reg
+          // preg == 0 means vreg is physical
+          if (preg != 0) { regUsed.insert(preg); }
+          else if (vreg != 0) { regUsed.insert(vreg); }
         }
       }
     }
+    DEBUG(dbgs() << "Registers used in this loop:\n");
+    const char *delimeter = "";
+    for (auto reg : regUsed) {
+      DEBUG(dbgs() << delimeter << PrintReg(reg, TRI));
+      delimeter = ", ";
+    }
+    DEBUG(dbgs() << '\n');
   }
   DEBUG(dbgs() << "WHZ: done\n");
 
