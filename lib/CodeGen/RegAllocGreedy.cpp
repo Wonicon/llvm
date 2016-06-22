@@ -2755,6 +2755,25 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     }
   }
 
+  DEBUG(dbgs() << "WHZ: start checking nvm still written in loops\n");
+  for (auto loop : *Loops) {
+    DEBUG(dbgs() << "loop depth: " << loop->getLoopDepth() << '\n');
+    for (auto block : loop->getBlocks()) {
+      DEBUG(block->dump());
+      for (auto&& instr : block->instrs()) {
+        for (auto&& ope : instr.operands()) {
+          decltype(ope.getReg()) vreg, preg;
+          if (ope.isReg() && ope.isDef()
+              && TRI->isVirtualRegister(vreg = ope.getReg())
+              && isNvm(preg = VRM->getPhys(vreg))) {
+            DEBUG(dbgs() << "Oops, nvm reg " << PrintReg(preg, TRI) << " is still written in loop\n");
+          }
+        }
+      }
+    }
+  }
+  DEBUG(dbgs() << "WHZ: done\n");
+
   releaseMemory();
   return true;
 }
