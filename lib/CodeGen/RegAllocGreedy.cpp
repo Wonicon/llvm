@@ -46,7 +46,9 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include <queue>
+#include <algorithm>
 
 using namespace llvm;
 
@@ -2762,33 +2764,68 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
   }
 
   DEBUG(dbgs() << "WHZ: start checking nvm still written in loops\n");
+  std::set<unsigned> SramSet(SramRegisters, SramRegisters + 8);
   for (auto loop : *Loops) {
     DEBUG(dbgs() << "loop depth: " << loop->getLoopDepth() << '\n');
-    std::set<unsigned> regUsed;
+
+    std::set<std::pair<unsigned, unsigned>> mapSet;
+    std::set<unsigned> usedSram;
+    // Get any nvm written in one loop
     for (auto block : loop->getBlocks()) {
-      DEBUG(block->dump());
+      DEBUG(dbgs() << "check block " << block->getName() << '\n');
       for (auto&& instr : block->instrs()) {
         for (auto&& ope : instr.operands()) {
           unsigned vreg = 0, preg = 0;
           if (ope.isReg() && ope.isDef()
               && TRI->isVirtualRegister(vreg = ope.getReg())
               && isNvm(preg = VRM->getPhys(vreg))) {
-            DEBUG(dbgs() << "Oops, nvm reg " << PrintReg(preg, TRI) << " is still written in loop\n");
+            mapSet.insert(std::pair<unsigned, unsigned>(vreg, preg));
+            DEBUG(dbgs() << "Oops, nvm reg " << PrintReg(preg, TRI)
+                         << " is still written in loop by "
+                         << PrintReg(vreg) << '\n');
           }
-          // vreg == 0 means not a reg
-          // preg == 0 means vreg is physical
-          if (preg != 0) { regUsed.insert(preg); }
-          else if (vreg != 0) { regUsed.insert(vreg); }
+          if (preg != 0)
+            usedSram.insert(preg);
+        }
+      }
+
+      // Get unused sram in this loop
+      std::set<unsigned> unusedSrams;
+      std::set_difference(SramSet.begin(), SramSet.end(), usedSram.begin(), usedSram.end(),
+                          std::inserter(unusedSrams, unusedSrams.end()));
+
+      // Replace
+      if (!mapSet.empty()) {
+        if (!unusedSrams.empty()) {
+          if (auto header = loop->getHeader()) {
+            SmallVector<MachineBasicBlock *, 8> exitBlocks;
+            loop->getExitBlocks(exitBlocks);
+
+            // Create a new virtual register
+            auto origalVReg = mapSet.begin()->first;
+            auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(origalVReg));
+            VRM->grow();
+            VRM->assignVirt2Phys(newVReg, *unusedSrams.begin());
+
+            /// @todo insert the instruction in the right place, both predecessor and successor.
+            /// @todo replace the virtual register with the new one.
+            /// @todo duplicated insertion detected!
+            DEBUG(header->dump());
+            auto MI = BuildMI(*header, header->instr_front(), DebugLoc(), TII->get(TargetOpcode::COPY), newVReg).addReg(origalVReg);
+            LIS->getSlotIndexes()->insertMachineInstrInMaps(*MI.getInstr());
+            DEBUG(header->dump());
+          }
+          else {
+            DEBUG(dbgs() << "no header\n");
+          }
+        }
+        else {
+          DEBUG(dbgs() << "all srams are used in loop\n");
         }
       }
     }
-    DEBUG(dbgs() << "Registers used in this loop:\n");
-    const char *delimeter = "";
-    for (auto reg : regUsed) {
-      DEBUG(dbgs() << delimeter << PrintReg(reg, TRI));
-      delimeter = ", ";
-    }
-    DEBUG(dbgs() << '\n');
+
+    // Replacing the nvm with sram
   }
   DEBUG(dbgs() << "WHZ: done\n");
 
