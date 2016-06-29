@@ -458,7 +458,7 @@ private:
           return 0;
         }
    }
-  }  
+  }
   void remapPhysReg(MachineFunction *MF, unsigned preg0, unsigned preg1);
 };
 
@@ -2788,40 +2788,44 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
             usedSram.insert(preg);
         }
       }
+    }
 
-      // Get unused sram in this loop
-      std::set<unsigned> unusedSrams;
-      std::set_difference(SramSet.begin(), SramSet.end(), usedSram.begin(), usedSram.end(),
-                          std::inserter(unusedSrams, unusedSrams.end()));
+    // Get unused sram in this loop
+    std::set<unsigned> unusedSrams;
+    std::set_difference(SramSet.begin(), SramSet.end(), usedSram.begin(), usedSram.end(),
+                        std::inserter(unusedSrams, unusedSrams.end()));
 
-      // Replace
-      if (!mapSet.empty()) {
-        if (!unusedSrams.empty()) {
-          if (auto header = loop->getHeader()) {
-            SmallVector<MachineBasicBlock *, 8> exitBlocks;
-            loop->getExitBlocks(exitBlocks);
+    // Replace
+    if (!mapSet.empty()) {
+      if (!unusedSrams.empty()) {
+        if (auto header = loop->getHeader()) {
+          SmallVector<MachineBasicBlock *, 8> exitBlocks;
+          loop->getExitBlocks(exitBlocks);
 
-            // Create a new virtual register
-            auto origalVReg = mapSet.begin()->first;
-            auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(origalVReg));
-            VRM->grow();
-            VRM->assignVirt2Phys(newVReg, *unusedSrams.begin());
+          // Create a new virtual register
+          auto origalVReg = mapSet.begin()->first;
+          auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(origalVReg));
+          VRM->grow();
+          auto sram = *unusedSrams.begin();
+          VRM->assignVirt2Phys(newVReg, sram);
+          // We use the new virtual register's stack slot to store the old value in sram.
+          // We expect that the spilling will use the original virtual register's stack slot...
+          int stackSlot = VRM->assignVirt2StackSlot(newVReg);
 
-            /// @todo insert the instruction in the right place, both predecessor and successor.
-            /// @todo replace the virtual register with the new one.
-            /// @todo duplicated insertion detected!
-            DEBUG(header->dump());
-            auto MI = BuildMI(*header, header->instr_front(), DebugLoc(), TII->get(TargetOpcode::COPY), newVReg).addReg(origalVReg);
-            LIS->getSlotIndexes()->insertMachineInstrInMaps(*MI.getInstr());
-            DEBUG(header->dump());
-          }
-          else {
-            DEBUG(dbgs() << "no header\n");
-          }
+          /// @todo insert the instruction in the right place, both predecessor and successor.
+          /// @todo replace the virtual register with the new one.
+          /// @todo duplicated insertion detected!
+          DEBUG(header->dump());
+          DEBUG(dbgs() << ">>>>>>>\n");
+          TII->storeRegToStackSlot(*header, header->instr_front(), sram, false, stackSlot, MRI->getRegClass(newVReg), TRI);
+          DEBUG(header->dump());
         }
         else {
-          DEBUG(dbgs() << "all srams are used in loop\n");
+          DEBUG(dbgs() << "no header\n");
         }
+      }
+      else {
+        DEBUG(dbgs() << "all srams are used in loop\n");
       }
     }
 
@@ -2867,3 +2871,5 @@ void RAGreedy::remapPhysReg(MachineFunction *MF, unsigned reg0, unsigned reg1) {
     }
   }
 }
+
+
