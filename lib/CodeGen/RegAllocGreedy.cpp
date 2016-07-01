@@ -510,21 +510,21 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<AAResultsWrapperPass>();
   AU.addPreserved<AAResultsWrapperPass>();
   AU.addRequired<LiveIntervals>();
-  AU.addPreserved<LiveIntervals>();
+  // AU.addPreserved<LiveIntervals>();
   AU.addRequired<SlotIndexes>();
-  AU.addPreserved<SlotIndexes>();
+  // AU.addPreserved<SlotIndexes>();
   AU.addRequired<LiveDebugVariables>();
-  AU.addPreserved<LiveDebugVariables>();
+  // AU.addPreserved<LiveDebugVariables>();
   AU.addRequired<LiveStacks>();
-  AU.addPreserved<LiveStacks>();
+  // AU.addPreserved<LiveStacks>();
   AU.addRequired<MachineDominatorTree>();
-  AU.addPreserved<MachineDominatorTree>();
+  // AU.addPreserved<MachineDominatorTree>();
   AU.addRequired<MachineLoopInfo>();
   AU.addPreserved<MachineLoopInfo>();
   AU.addRequired<VirtRegMap>();
   AU.addPreserved<VirtRegMap>();
   AU.addRequired<LiveRegMatrix>();
-  AU.addPreserved<LiveRegMatrix>();
+  // AU.addPreserved<LiveRegMatrix>();
   AU.addRequired<EdgeBundles>();
   AU.addRequired<SpillPlacement>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -2799,12 +2799,42 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
     if (!mapSet.empty()) {
       if (!unusedSrams.empty()) {
         if (auto header = loop->getHeader()) {
-          SmallVector<MachineBasicBlock *, 8> exitBlocks;
-          loop->getExitBlocks(exitBlocks);
+          //==--------------------------------==
+          // Create a basic block and place it
+          // in right place
+          //==--------------------------------==
+          MachineBasicBlock *predMBB = nullptr;
+          for (auto pred : header->predecessors()) {
+            if (!loop->contains(pred)) {
+              DEBUG(dbgs() << "Found a MBB outside loop\n");
+              predMBB = pred;
+            }
+          }
 
+          //==-------------------------------==
+          // Add a new MachineBasicBlock
+          // and insert it between pred and header
+          //==-------------------------------==
+          auto newMBB = MF->CreateMachineBasicBlock();
+          MF->push_back(newMBB);
+
+          auto& lastInstr = *predMBB->instr_rbegin();
+          if (lastInstr.isBranch()) {
+            auto dstMBB = lastInstr.getOperand(0).getMBB();
+            if (dstMBB == header) {
+              lastInstr.getOperand(0).setMBB(newMBB);
+            }
+          }
+          predMBB->removeSuccessor(header);
+          predMBB->addSuccessor(newMBB);
+          newMBB->addSuccessor(header);
+
+          //==--------------------------------==
           // Create a new virtual register
-          auto origalVReg = mapSet.begin()->first;
-          auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(origalVReg));
+          // and allocate a stack slot
+          //==--------------------------------==
+          auto oringalVReg = mapSet.begin()->first;
+          auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(oringalVReg));
           VRM->grow();
           auto sram = *unusedSrams.begin();
           VRM->assignVirt2Phys(newVReg, sram);
@@ -2812,12 +2842,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           // We expect that the spilling will use the original virtual register's stack slot...
           int stackSlot = VRM->assignVirt2StackSlot(newVReg);
 
-          /// @todo insert the instruction in the right place, both predecessor and successor.
           /// @todo replace the virtual register with the new one.
-          /// @todo duplicated insertion detected!
-          DEBUG(header->dump());
-          DEBUG(dbgs() << ">>>>>>>\n");
-          TII->storeRegToStackSlot(*header, header->instr_front(), sram, false, stackSlot, MRI->getRegClass(newVReg), TRI);
+          TII->storeRegToStackSlot(*newMBB, newMBB->instr_end(), sram, false,
+                                   stackSlot, MRI->getRegClass(newVReg), TRI);
+
+          DEBUG(predMBB->dump());
+          DEBUG(newMBB->dump());
           DEBUG(header->dump());
         }
         else {
