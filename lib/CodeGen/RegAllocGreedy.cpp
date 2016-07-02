@@ -2816,14 +2816,14 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           // and insert it between pred and header
           //==-------------------------------==
           auto newMBB = MF->CreateMachineBasicBlock();
-          MF->push_back(newMBB);
 
           auto& lastInstr = *predMBB->instr_rbegin();
-          if (lastInstr.isBranch()) {
-            auto dstMBB = lastInstr.getOperand(0).getMBB();
-            if (dstMBB == header) {
-              lastInstr.getOperand(0).setMBB(newMBB);
-            }
+          if (lastInstr.isBranch() && lastInstr.getOperand(0).getMBB() == header) {
+            lastInstr.getOperand(0).setMBB(newMBB);
+            MF->insert(header->getIterator(), newMBB);
+          }
+          else {
+            MF->insert(++predMBB->getIterator(), newMBB);
           }
           predMBB->removeSuccessor(header);
           predMBB->addSuccessor(newMBB);
