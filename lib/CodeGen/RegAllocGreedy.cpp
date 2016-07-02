@@ -510,21 +510,21 @@ void RAGreedy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<AAResultsWrapperPass>();
   AU.addPreserved<AAResultsWrapperPass>();
   AU.addRequired<LiveIntervals>();
-  // AU.addPreserved<LiveIntervals>();
+  AU.addPreserved<LiveIntervals>();
   AU.addRequired<SlotIndexes>();
-  // AU.addPreserved<SlotIndexes>();
+  AU.addPreserved<SlotIndexes>();
   AU.addRequired<LiveDebugVariables>();
-  // AU.addPreserved<LiveDebugVariables>();
+  AU.addPreserved<LiveDebugVariables>();
   AU.addRequired<LiveStacks>();
-  // AU.addPreserved<LiveStacks>();
+  AU.addPreserved<LiveStacks>();
   AU.addRequired<MachineDominatorTree>();
-  // AU.addPreserved<MachineDominatorTree>();
+  AU.addPreserved<MachineDominatorTree>();
   AU.addRequired<MachineLoopInfo>();
   AU.addPreserved<MachineLoopInfo>();
   AU.addRequired<VirtRegMap>();
   AU.addPreserved<VirtRegMap>();
   AU.addRequired<LiveRegMatrix>();
-  // AU.addPreserved<LiveRegMatrix>();
+  AU.addPreserved<LiveRegMatrix>();
   AU.addRequired<EdgeBundles>();
   AU.addRequired<SpillPlacement>();
   MachineFunctionPass::getAnalysisUsage(AU);
@@ -2845,6 +2845,12 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           /// @todo replace the virtual register with the new one.
           TII->storeRegToStackSlot(*newMBB, newMBB->instr_end(), sram, false,
                                    stackSlot, MRI->getRegClass(newVReg), TRI);
+
+          //==------------------------------------------------------------==
+          // THE INCREDIBLE, LIFE-SAVING, LIFE-CHANGING INTERFACE
+          // AVOIDS INCONSISTENCY IN THE FOLLOWING PASSES
+          //==------------------------------------------------------------==
+          Indexes->insertMBBInMaps(newMBB);
 
           DEBUG(predMBB->dump());
           DEBUG(newMBB->dump());
