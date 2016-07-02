@@ -2833,8 +2833,8 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           // Create a new virtual register
           // and allocate a stack slot
           //==--------------------------------==
-          auto oringalVReg = mapSet.begin()->first;
-          auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(oringalVReg));
+          auto originalVReg = mapSet.begin()->first;
+          auto newVReg = MRI->createVirtualRegister(MRI->getRegClass(originalVReg));
           VRM->grow();
           auto sram = *unusedSrams.begin();
           VRM->assignVirt2Phys(newVReg, sram);
@@ -2842,9 +2842,17 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           // We expect that the spilling will use the original virtual register's stack slot...
           int stackSlot = VRM->assignVirt2StackSlot(newVReg);
 
-          /// @todo replace the virtual register with the new one.
-          TII->storeRegToStackSlot(*newMBB, newMBB->instr_end(), sram, false,
-                                   stackSlot, MRI->getRegClass(newVReg), TRI);
+          //==---------------------------------==
+          // Check whether the allocated sram
+          // is defined or not.
+          //==---------------------------------==
+          if (header->isLiveIn(sram)) {
+            TII->storeRegToStackSlot(*newMBB, newMBB->instr_end(), sram, false,
+                                     stackSlot, MRI->getRegClass(newVReg), TRI);
+          }
+          else {
+            DEBUG(dbgs() << "no need to back up " << PrintReg(sram, TRI) << '\n');
+          }
 
           //==------------------------------------------------------------==
           // THE INCREDIBLE, LIFE-SAVING, LIFE-CHANGING INTERFACE
@@ -2855,6 +2863,36 @@ bool RAGreedy::runOnMachineFunction(MachineFunction &mf) {
           DEBUG(predMBB->dump());
           DEBUG(newMBB->dump());
           DEBUG(header->dump());
+
+          //==----------------------------------------==
+          // Replace the old vreg with the new one
+          // as we don't want to change the binding.
+          //==----------------------------------------==
+          for (auto MBB : loop->blocks()) {
+            for (auto& MI : MBB->instrs()) {
+              for (auto& OPE : MI.operands()) {
+                if (OPE.isReg() && OPE.getReg() == originalVReg) {
+                  OPE.setReg(newVReg);
+                }
+              }
+            }
+          }
+
+          //==----------------------------------------==
+          // Recover nvm data from sram
+          //==----------------------------------------==
+          SmallVector<MachineBasicBlock *, 2> exitBlocks;
+          loop->getExitBlocks(exitBlocks);
+          for (auto exitMBB : exitBlocks) {
+            if (exitMBB->isLiveIn(originalVReg)) {
+              // Original vreg is defined in some branches in the loop,
+              // and not all exit blocks will need this value.
+              auto MI = BuildMI(*exitMBB, exitMBB->begin(), DebugLoc(), TII->get(TargetOpcode::COPY), originalVReg)
+                      .addReg(newVReg);
+              Indexes->insertMachineInstrInMaps(*MI.getInstr());
+              DEBUG(exitMBB->dump());
+            }
+          }
         }
         else {
           DEBUG(dbgs() << "no header\n");
